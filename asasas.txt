@@ -1,0 +1,2159 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using EVP;
+using Photon;
+using Rewired.ComponentControls.Effects;
+using UnityEngine;
+
+// Token: 0x02000347 RID: 839
+public class Tornado : Photon.MonoBehaviour
+{
+	// Token: 0x17000328 RID: 808
+	// (get) Token: 0x0600182B RID: 6187 RVA: 0x00014B53 File Offset: 0x00012D53
+	// (set) Token: 0x0600182C RID: 6188 RVA: 0x00014B5B File Offset: 0x00012D5B
+	public int spawnerId
+	{
+		get
+		{
+			return this._spawnerId;
+		}
+		set
+		{
+			this._spawnerId = value;
+		}
+	}
+
+	// Token: 0x0600182D RID: 6189 RVA: 0x00014B64 File Offset: 0x00012D64
+	private void OnEnable()
+	{
+		this.firstTake = true;
+	}
+
+	// Token: 0x0600182E RID: 6190 RVA: 0x000C46D8 File Offset: 0x000C28D8
+	private void Awake()
+	{
+		this.columnAudioInitialMaxDistance = this.columnAudio.maxDistance;
+		this.groundAudioInitialMaxDistance = this.groundAudio.maxDistance;
+		this.columnParticleModule = this.tornadoColumn.GetComponent<ParticleSystem>().main;
+		this.columnParticleVelocityModule = this.tornadoColumn.GetComponent<ParticleSystem>().velocityOverLifetime;
+		this.columnParticleSizeModule = this.tornadoColumn.GetComponent<ParticleSystem>().sizeOverLifetime;
+		this.groundCloudParticleModule = this.groundCloud.main;
+		this.groundCloudParticleEmissionModule = this.groundCloud.emission;
+		this.groundRotatingCloudParticleModule = this.groundRotatingCloud.main;
+		this.groundRotatingCloudShapeModule = this.groundRotatingCloud.shape;
+		this.groundRotatingCloudVelocityModule = this.groundRotatingCloud.velocityOverLifetime;
+		this.groundDebrisShapeModule = this.groundDebris.shape;
+		this.rainWallEmissionModule = this.rainWall.emission;
+		this.cloudRotatingAroundAxis = this.cloudRotating.GetComponent<RotateAroundAxis>();
+		this.rainWallEmissionModule.rateOverTime = 0f;
+		this.groundCloud.gameObject.SetActive(false);
+		this.groundRotatingCloud.gameObject.SetActive(false);
+		this.groundDebris.gameObject.SetActive(false);
+		this.physicsRoot.SetActive(false);
+		this.tornadoColumn.transform.localPosition = new Vector3(0f, 0f, this.columnStartYPosition);
+		this.physicsRoot.transform.localPosition = new Vector3(this.physicsRoot.transform.localPosition.x, this.physicsRoot.transform.localPosition.y, this.columnStartYPosition);
+		this.gameController = GameController.Instance;
+	}
+
+	// Token: 0x0600182F RID: 6191 RVA: 0x000C489C File Offset: 0x000C2A9C
+	private void Start()
+	{
+		this.gameController.addTornado(this);
+		if (!this.isControlled)
+		{
+			base.transform.parent = this.gameController.tornadoParent;
+		}
+		this.nextChangeCategoryTime = this.changeCategoryTime;
+		this.fakeTornadoColumnTargetPosition = this.columnStartYPosition * 0.5f;
+		base.StartCoroutine(this.removeTerrainDetails());
+		this.columnLifeTime = this.columnParticleModule.startLifetime.constant;
+		this.tornadoMapPolygon.transform.parent = this.gameController.tornadoWarningsParent;
+		this.thunderstormMapPolygon.transform.parent = this.gameController.tornadoWarningsParent;
+		if (!base.photonView.isMine)
+		{
+			base.GetComponent<NoiseMove>().enabled = false;
+			base.photonView.RPC("retrieveTornadoValues", base.photonView.owner, Array.Empty<object>());
+			return;
+		}
+		this.rotatingCloudGroundRadialMultiplier = UnityEngine.Random.Range(0f, 10f);
+		if (GlobalValues.Instance.gameType == GlobalValues.GameType.ONLINE_VERSUS)
+		{
+			this.maxStartTime = (float)this.gameController.gameDuration * 0.5f;
+		}
+		if (this.tornadoType != Tornado.TornadoType.REAL)
+		{
+			UnityEngine.Object.Destroy(this.groundMarksRenderer.gameObject);
+		}
+		else
+		{
+			this.groundMarksRenderer.transform.parent = null;
+			this.groundMarksRenderer.transform.position = Vector3.zero;
+			this.groundMarksRenderer.transform.eulerAngles = Vector3.zero;
+			this.groundMarksRenderer.transform.parent = GameObject.Find("Ground Material Manager").transform;
+		}
+		this.updateParentTornado();
+		if (this.isControlled)
+		{
+			this.category = Tornado.TornadoCategory.EF0;
+			this.rainWall.gameObject.SetActive(false);
+			this.wallCloudHeight = UnityEngine.Random.Range(this.minWallCloudHeight, this.maxWallCloudHeight);
+			this.emitHail = false;
+			this.thunderstormAmount = 0f;
+			this.rainAmount = 0.3f;
+			this.columnFormationSpeed = this.maxColumnFormationSpeed * 2f;
+			base.GetComponent<NoiseMove>().enabled = false;
+			this.tornadoColumn.GetComponent<ColumnMove>().enabled = false;
+			this.startTime = 999999f;
+			this.fullFormationTime = 0f;
+			this.durationTime = 999999f;
+			base.gameObject.AddComponent<ForceFixedRotation>().setRotation(new Vector3(-90f, 0f, 0f));
+		}
+		else if (this.randomGeneration)
+		{
+			this.columnFormationSpeed = UnityEngine.Random.Range(this.minColumnFormationSpeed, this.maxColumnFormationSpeed);
+			float num = UnityEngine.Random.Range(0f, 10f);
+			if (num >= 9.7f)
+			{
+				this.category = Tornado.TornadoCategory.EF5;
+			}
+			else if (num >= 8.75f)
+			{
+				this.category = Tornado.TornadoCategory.EF4;
+			}
+			else if (num >= 7.5f)
+			{
+				this.category = Tornado.TornadoCategory.EF3;
+			}
+			else if (num >= 5.5f)
+			{
+				this.category = Tornado.TornadoCategory.EF2;
+			}
+			else if (num >= 3f)
+			{
+				this.category = Tornado.TornadoCategory.EF1;
+			}
+			else
+			{
+				this.category = Tornado.TornadoCategory.EF0;
+			}
+			this.wallCloudHeight = UnityEngine.Random.Range(this.minWallCloudHeight, this.maxWallCloudHeight);
+			if (GlobalValues.Instance.getGameMode() == GlobalValues.GameMode.TORNADO_CONTROLLER)
+			{
+				this.rainAmount = 0f;
+			}
+			else if (this.surroundTornadoLayerIndex == 1)
+			{
+				this.rainAmount = UnityEngine.Random.Range(0.5f, 0.9f);
+			}
+			else
+			{
+				this.rainAmount = UnityEngine.Random.Range(0f, 0.9f);
+			}
+			switch (this.category)
+			{
+			case Tornado.TornadoCategory.EF0:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability / 6f);
+				this.thunderstormAmount = UnityEngine.Random.Range(0f, 0.6f);
+				break;
+			case Tornado.TornadoCategory.EF1:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability / 5f);
+				this.thunderstormAmount = UnityEngine.Random.Range(0f, 0.65f);
+				break;
+			case Tornado.TornadoCategory.EF2:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability / 4f);
+				this.thunderstormAmount = UnityEngine.Random.Range(0.1f, 0.7f);
+				break;
+			case Tornado.TornadoCategory.EF3:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability / 3f);
+				this.thunderstormAmount = UnityEngine.Random.Range(0.1f, 0.8f);
+				break;
+			case Tornado.TornadoCategory.EF4:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability / 2f);
+				this.thunderstormAmount = UnityEngine.Random.Range(0.15f, 0.9f);
+				break;
+			case Tornado.TornadoCategory.EF5:
+				this.emitHail = (UnityEngine.Random.value < this.hailProbability);
+				this.thunderstormAmount = UnityEngine.Random.Range(0.2f, 1f);
+				break;
+			}
+			if (this.tornadoType != Tornado.TornadoType.REAL)
+			{
+				this.emitHail = (this.emitHail && UnityEngine.Random.value < this.hailProbability / 6f);
+				this.thunderstormAmount *= UnityEngine.Random.Range(0.5f, 1f);
+				this.startTime = UnityEngine.Random.Range(this.minStartTime, this.maxStartTime * 5f);
+			}
+			else
+			{
+				this.startTime = UnityEngine.Random.Range(this.minStartTime, this.maxStartTime);
+			}
+			this.durationTime = UnityEngine.Random.Range(this.minDurationTime, this.maxDurationTime);
+			this.tornadoWarningColumnPercent = UnityEngine.Random.Range(0f, 1f);
+			if (this.emitHail)
+			{
+				this.rainAmount = 1f;
+			}
+		}
+		if (this.isControlled)
+		{
+			this.fullFormationTime = 0f;
+		}
+		else if (this.parentTornado != null)
+		{
+			this.fullFormationTime = UnityEngine.Random.Range(this.parentTornado.fullFormationTime * 0.5f, this.parentTornado.fullFormationTime);
+		}
+		else
+		{
+			this.fullFormationTime = UnityEngine.Random.Range(this.startTime * 0.75f, this.startTime);
+		}
+		this.newForcedCategory = this.category;
+		this.updateTornadoFormation();
+		this.tornadoPolygonScale = new Vector3(UnityEngine.Random.Range(0.75f, 1f), UnityEngine.Random.Range(0.75f, 1f), 1f);
+		this.tornadoPolygonTranslation = new Vector3((float)UnityEngine.Random.Range(-250, 250), 0f, (float)UnityEngine.Random.Range(-250, 250));
+		this.tornadoPolygonRotation = (float)UnityEngine.Random.Range(0, 360);
+		this.thunderstormPolygonScale = new Vector3(UnityEngine.Random.Range(0.75f, 1f), UnityEngine.Random.Range(0.75f, 1f), 1f);
+		this.thunderstormPolygonTranslation = new Vector3((float)UnityEngine.Random.Range(-250, 250), 0f, (float)UnityEngine.Random.Range(-250, 250));
+		this.thunderstormPolygonRotation = (float)UnityEngine.Random.Range(0, 360);
+		if (this.tornadoType != Tornado.TornadoType.REAL)
+		{
+			this.fakeTornadoColumnTargetPosition = Mathf.Max(this.groundHeight + 10f, this.columnStartYPosition * UnityEngine.Random.Range(0.25f, 0.75f));
+		}
+		this.newCategory = this.category;
+		this.sizeConeEnlargeTime = UnityEngine.Random.Range(0.75f, 0.9f);
+		this.curveGoingUp = (UnityEngine.Random.value < 0.75f);
+		switch (this.category)
+		{
+		case Tornado.TornadoCategory.EF0:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 10f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 10f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 10f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.4f, 0.55f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.15f, 0.18f);
+			break;
+		case Tornado.TornadoCategory.EF1:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 8f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 8f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 8f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.5f, 0.65f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.15f, 0.2f);
+			break;
+		case Tornado.TornadoCategory.EF2:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 6f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 6f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 6f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.6f, 0.75f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.2f, 0.25f);
+			break;
+		case Tornado.TornadoCategory.EF3:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 4f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 4f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 4f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.7f, 0.85f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.25f, 0.35f);
+			break;
+		case Tornado.TornadoCategory.EF4:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 2f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 2f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 2f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.8f, 0.95f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.3f, 0.5f);
+			break;
+		case Tornado.TornadoCategory.EF5:
+			this.curveMultiplierX = UnityEngine.Random.Range(0f, 1f);
+			this.curveMultiplierY = UnityEngine.Random.Range(0f, 1f);
+			this.curveMultiplierZ = UnityEngine.Random.Range(0f, 1f);
+			this.tornadoAlpha = UnityEngine.Random.Range(0.9f, 1f);
+			this.sizeConeBase = UnityEngine.Random.Range(0.4f, 0.5f);
+			break;
+		}
+		if (this.isControlled)
+		{
+			this.sizeConeBase = UnityEngine.Random.Range(0.3f, 0.5f);
+		}
+		this.updateTornadoSettings();
+	}
+
+	// Token: 0x06001830 RID: 6192 RVA: 0x000C52A4 File Offset: 0x000C34A4
+	[PunRPC]
+	private void retrieveTornadoValues()
+	{
+		base.photonView.RPC("updateTornadoValues", PhotonTargets.Others, new object[]
+		{
+			this.timer,
+			this.isControlled,
+			this.tornadoType,
+			this.state,
+			this.curveGoingUp,
+			this.curveMultiplierX,
+			this.curveMultiplierY,
+			this.curveMultiplierZ,
+			this.rotatingCloudGroundRadialMultiplier,
+			this.sizeConeEnlargeTime,
+			this.sizeConeBase,
+			this.category,
+			this.isChangingCategory,
+			this.categoryModifier,
+			this.changeCategoryTimer,
+			this.newCategory,
+			this.isFinishing,
+			this.categoryKnown,
+			this.columnFormationSpeed,
+			this.emitHail,
+			this.thunderstormAmount,
+			this.rainAmount,
+			this.tornadoAlpha,
+			this.startTime,
+			this.fullFormationTime,
+			this.durationTime,
+			this.fakeTornadoColumnTargetPosition,
+			this.attachedTornadoPhotonId,
+			this.radarWindDirectionInside,
+			this.tornadoPolygonTranslation,
+			this.tornadoPolygonScale,
+			this.tornadoPolygonRotation,
+			this.thunderstormPolygonTranslation,
+			this.thunderstormPolygonScale,
+			this.thunderstormPolygonRotation,
+			this.wallCloudHeight,
+			this.tornadoWarningColumnPercent,
+			this.surroundTornadoLayerIndex
+		});
+	}
+
+	// Token: 0x06001831 RID: 6193 RVA: 0x000C54FC File Offset: 0x000C36FC
+	[PunRPC]
+	private void updateTornadoValues(float timer, bool isControlled, Tornado.TornadoType tornadoType, Tornado.TornadoState state, bool curveGoingUp, float curveMultiplierX, float curveMultiplierY, float curveMultiplierZ, float rotatingCloudGroundRadialMultiplier, float sizeCurveEnlargeTime, float sizeConeBase, Tornado.TornadoCategory category, bool isChangingCategory, int categoryModifier, float changeCategoryTimer, Tornado.TornadoCategory newCategory, bool isFinishing, bool categoryKnown, float columnFormationSpeed, bool emitHail, float thunderstormAmount, float rainAmount, float tornadoAlpha, float startTime, float fullFormationTime, float durationTime, float fakeTornadoColumnTargetPosition, int attachedTornadoPhotonId, bool radarWindDirectionInside, Vector3 tornadoPolygonTranslation, Vector3 tornadoPolygonScale, float tornadoPolygonRotation, Vector3 thunderstormPolygonTranslation, Vector3 thunderstormPolygonScale, float thunderstormPolygonRotation, float wallCloudHeight, float tornadoWarningColumnPercent, int surroundTornadoLayerIndex)
+	{
+		this.timer = timer;
+		this.isControlled = isControlled;
+		this.tornadoType = tornadoType;
+		this.state = state;
+		this.curveGoingUp = curveGoingUp;
+		this.curveMultiplierX = curveMultiplierX;
+		this.curveMultiplierY = curveMultiplierY;
+		this.curveMultiplierZ = curveMultiplierZ;
+		this.rotatingCloudGroundRadialMultiplier = rotatingCloudGroundRadialMultiplier;
+		this.sizeConeEnlargeTime = sizeCurveEnlargeTime;
+		this.sizeConeBase = sizeConeBase;
+		this.category = category;
+		this.newForcedCategory = category;
+		this.isChangingCategory = isChangingCategory;
+		this.newCategory = newCategory;
+		this.categoryModifier = categoryModifier;
+		this.changeCategoryTimer = changeCategoryTimer;
+		this.isFinishing = isFinishing;
+		this.categoryKnown = categoryKnown;
+		this.columnFormationSpeed = columnFormationSpeed;
+		this.emitHail = emitHail;
+		this.thunderstormAmount = thunderstormAmount;
+		this.rainAmount = rainAmount;
+		this.tornadoAlpha = tornadoAlpha;
+		this.startTime = startTime;
+		this.fullFormationTime = fullFormationTime;
+		this.durationTime = durationTime;
+		this.attachedTornadoPhotonId = attachedTornadoPhotonId;
+		this.fakeTornadoColumnTargetPosition = fakeTornadoColumnTargetPosition;
+		this.radarWindDirectionInside = radarWindDirectionInside;
+		this.tornadoPolygonTranslation = tornadoPolygonTranslation;
+		this.tornadoPolygonScale = tornadoPolygonScale;
+		this.tornadoPolygonRotation = tornadoPolygonRotation;
+		this.thunderstormPolygonTranslation = thunderstormPolygonTranslation;
+		this.thunderstormPolygonScale = thunderstormPolygonScale;
+		this.thunderstormPolygonRotation = thunderstormPolygonRotation;
+		this.wallCloudHeight = wallCloudHeight;
+		this.tornadoWarningColumnPercent = tornadoWarningColumnPercent;
+		this.surroundTornadoLayerIndex = surroundTornadoLayerIndex;
+		this.updateTornadoSettings();
+		this.updateTornadoFormation();
+		if (isControlled)
+		{
+			base.gameObject.AddComponent<ForceFixedRotation>();
+		}
+		if (this.groundMarksRenderer != null)
+		{
+			if (tornadoType != Tornado.TornadoType.REAL)
+			{
+				UnityEngine.Object.Destroy(this.groundMarksRenderer.gameObject);
+			}
+			else
+			{
+				this.groundMarksRenderer.transform.parent = null;
+				this.groundMarksRenderer.transform.position = Vector3.zero;
+				this.groundMarksRenderer.transform.eulerAngles = Vector3.zero;
+				this.groundMarksRenderer.transform.parent = GameObject.Find("Ground Material Manager").transform;
+			}
+		}
+		if (startTime == 0f && durationTime == 0f)
+		{
+			base.photonView.RPC("retrieveTornadoValues", base.photonView.owner, Array.Empty<object>());
+		}
+	}
+
+	// Token: 0x06001832 RID: 6194 RVA: 0x000C5708 File Offset: 0x000C3908
+	private void Update()
+	{
+		this.updateTornadoFormation();
+		this.columnTouchingGroundPercent = Mathf.Min(1f, 1f - (this.tornadoColumn.transform.localPosition.z - this.groundHeight) / this.columnStartYPosition);
+		if (!this.tornadoWarningSent && !this.isControlled && this.state == Tornado.TornadoState.ENABLED && this.columnTouchingGroundPercent >= this.tornadoWarningColumnPercent)
+		{
+			this.tornadoWarningSent = true;
+			GameController.Instance.notifyNewEnabledTornado(this);
+		}
+		if (this.tornadoType == Tornado.TornadoType.SURROUND && this.parentTornado == null)
+		{
+			this.updateParentTornado();
+		}
+		if (this.gameController.getLocalPlayer() != null)
+		{
+			this.playerDistance = Vector3.Distance(this.gameController.getLocalPlayer().transform.position, this.tornadoColumn.transform.position);
+		}
+		else if (this.gameController.getLocalTornadoController() != null)
+		{
+			this.playerDistance = Vector3.Distance(this.gameController.getLocalTornadoController().mainCamera.transform.position, this.tornadoColumn.transform.position);
+		}
+		if (this.isDeleted)
+		{
+			ParticleSystem[] componentsInChildren = base.transform.GetComponentsInChildren<ParticleSystem>();
+			for (int i = 0; i < componentsInChildren.Length; i++)
+			{
+				ParticleSystem.EmissionModule emission = componentsInChildren[i].emission;
+				emission.rateOverTime = Mathf.Lerp(emission.rateOverTime.constant, 0f, Time.deltaTime * 0.05f);
+			}
+		}
+		else
+		{
+			Tornado.TornadoState tornadoState = this.state;
+			if (tornadoState != Tornado.TornadoState.ENABLED)
+			{
+				if (tornadoState == Tornado.TornadoState.DISABLED)
+				{
+					if (!this.tornadoDisabled)
+					{
+						this.tornadoDisabled = true;
+						this.tornadoColumn.GetComponent<ParticleSystem>().emission.enabled = false;
+						this.groundCloud.GetComponent<ParticleSystem>().emission.enabled = false;
+						this.groundRotatingCloud.GetComponent<ParticleSystem>().emission.enabled = false;
+						this.groundDebris.GetComponent<ParticleSystem>().emission.enabled = false;
+						this.physicsRoot.SetActive(false);
+						this.mapMarker.SetActive(false);
+						this.touchingGround = false;
+						this.groundAudio.enabled = false;
+					}
+					this.setTornadoVolume(Mathf.Min(1f, this.columnTouchingGroundPercent * this.columnTouchingGroundPercent * this.columnTouchingGroundPercent) * this.columnAudioVolume);
+				}
+			}
+			else
+			{
+				if (this.discovered)
+				{
+					this.mapMarker.SetActive(true);
+				}
+				ParticleSystem.EmissionModule emission2 = this.tornadoColumn.GetComponent<ParticleSystem>().emission;
+				if (!this.tornadoColumn.activeInHierarchy || !emission2.enabled)
+				{
+					emission2.enabled = true;
+					this.tornadoColumn.SetActive(true);
+					this.groundCloud.gameObject.SetActive(true);
+					this.groundCloud.emission.enabled = true;
+					this.groundAudio.enabled = true;
+					this.physicsRoot.SetActive(true);
+					if (this.discovered)
+					{
+						this.discover();
+					}
+				}
+				if (!this.touchingGround)
+				{
+					if (this.tornadoColumn.transform.localPosition.z <= this.groundHeight + 10f && this.groundRotatingCloud != null)
+					{
+						this.groundRotatingCloud.gameObject.SetActive(true);
+						this.groundRotatingCloud.GetComponent<TornadoRotatingCloudParticles>().started = true;
+					}
+					if (this.tornadoColumn.transform.localPosition.z <= this.groundHeight)
+					{
+						this.tornadoColumn.transform.localPosition = new Vector3(this.tornadoColumn.transform.localPosition.x, this.tornadoColumn.transform.localPosition.y, 0.2f);
+						this.touchingGround = true;
+						if (this.groundDebris != null)
+						{
+							this.groundDebris.gameObject.SetActive(true);
+						}
+						for (int j = 0; j < base.transform.childCount; j++)
+						{
+							GameObject gameObject = base.transform.GetChild(j).gameObject;
+							if (gameObject.GetComponent<ParticleSystem>() != null)
+							{
+								gameObject.GetComponent<ParticleSystem>().emission.enabled = true;
+							}
+						}
+						this.groundCloudParticleEmissionModule.enabled = false;
+					}
+				}
+				if (!this.touchingGround || this.columnParticleModule.startLifetime.constant < this.columnLifeTime)
+				{
+					this.columnParticleModule.startLifetime = Mathf.Max(2f, this.columnLifeTime * this.columnTouchingGroundPercent);
+					this.columnParticleModule.startSizeXMultiplier = Mathf.Max(10f, this.columnStartSize * this.columnTouchingGroundPercent);
+					this.columnParticleModule.startSizeYMultiplier = Mathf.Max(10f, this.columnStartSize * this.columnTouchingGroundPercent);
+					Color color = this.groundCloudParticleModule.startColor.color;
+					color.a = this.columnTouchingGroundPercent * this.columnTouchingGroundPercent;
+					this.groundCloudParticleModule.startColor = color;
+					this.setTornadoVolume(Mathf.Min(1f, this.columnTouchingGroundPercent * this.columnTouchingGroundPercent * this.columnTouchingGroundPercent) * this.columnAudioVolume);
+					this.physicsRoot.transform.localPosition = new Vector3(this.physicsRoot.transform.localPosition.x, this.physicsRoot.transform.localPosition.y, this.columnStartYPosition - this.columnTouchingGroundPercent * this.columnTouchingGroundPercent * this.columnStartYPosition);
+					Keyframe[] array = new Keyframe[3];
+					array[0] = new Keyframe(0f, this.sizeConeBase * 0.7f * Mathf.Pow(this.columnTouchingGroundPercent, 8f));
+					array[0].inTangent = 0f;
+					array[0].outTangent = 0f;
+					array[1] = new Keyframe(0.3f, this.sizeConeBase * Mathf.Pow(this.columnTouchingGroundPercent, 8f));
+					array[1].inTangent = 0f;
+					array[1].outTangent = 0f;
+					array[2] = new Keyframe(this.sizeConeEnlargeTime, 1f * this.columnTouchingGroundPercent);
+					array[2].inTangent = 1.5708f * this.columnTouchingGroundPercent;
+					AnimationCurve curve = new AnimationCurve(array);
+					this.columnParticleSizeModule.size = new ParticleSystem.MinMaxCurve(this.columnParticleSizeModule.sizeMultiplier, curve);
+				}
+				else
+				{
+					this.setTornadoVolume(Mathf.Min(1f, this.columnAudioVolume));
+				}
+				if (this.isFinishing)
+				{
+					this.changeCategoryTimer += Time.deltaTime;
+					this.finishingPercent = Mathf.Min(1f, this.changeCategoryTimer / this.finishingTime);
+					this.updateTornadoSettings(this.newCategory, Tornado.TornadoCategory.EF0, this.finishingPercent);
+					if (this.isControlled)
+					{
+						if (this.finishingPercent >= 1f)
+						{
+							this.newCategory = this.category;
+							this.isFinishing = false;
+							if (base.photonView != null && base.photonView.isMine)
+							{
+								this.disableTornadoRPC();
+							}
+						}
+					}
+					else
+					{
+						if (this.columnParticleModule.startSizeXMultiplier < 10f)
+						{
+							this.category = Tornado.TornadoCategory.EF0;
+						}
+						else if (this.columnParticleModule.startSizeXMultiplier < 20f)
+						{
+							this.category = Tornado.TornadoCategory.EF1;
+						}
+						else if (this.columnParticleModule.startSizeXMultiplier < 40f)
+						{
+							this.category = Tornado.TornadoCategory.EF2;
+						}
+						else if (this.columnParticleModule.startSizeXMultiplier < 60f)
+						{
+							this.category = Tornado.TornadoCategory.EF3;
+						}
+						else if (this.columnParticleModule.startSizeXMultiplier < 90f)
+						{
+							this.category = Tornado.TornadoCategory.EF4;
+						}
+						this.newForcedCategory = this.category;
+					}
+				}
+				else if (this.isChangingCategory)
+				{
+					this.changeCategoryTimer += Time.deltaTime;
+					float lerpValue = Mathf.Min(1f, this.changeCategoryTimer / this.changeCategoryDuration);
+					this.updateTornadoSettings(this.category, this.newCategory, lerpValue);
+					if (this.changeCategoryTimer > this.changeCategoryDuration)
+					{
+						this.category = this.newCategory;
+						this.newForcedCategory = this.category;
+						this.isChangingCategory = false;
+					}
+				}
+			}
+		}
+		if (base.photonView != null && !base.photonView.isMine)
+		{
+			if (this.networkTransformPosition != Vector3.zero && this.networkTransformRotation != Quaternion.identity)
+			{
+				base.transform.position = Vector3.Lerp(base.transform.position, this.networkTransformPosition, Time.deltaTime * 5f);
+				if (!this.isControlled)
+				{
+					base.transform.rotation = Quaternion.Lerp(base.transform.rotation, this.networkTransformRotation, Time.deltaTime * 5f);
+				}
+				else
+				{
+					base.transform.localEulerAngles = new Vector3(-90f, 0f, 0f);
+				}
+				this.tornadoColumn.transform.localPosition = Vector3.Lerp(this.tornadoColumn.transform.localPosition, this.networkTornadoColumnTransformPosition, Time.deltaTime * 5f);
+				this.physicsRoot.transform.localPosition = Vector3.Lerp(this.physicsRoot.transform.localPosition, this.networkTornadoPhysicsTransformPosition, Time.deltaTime * 5f);
+			}
+			return;
+		}
+		if (!this.isControlled)
+		{
+			if (!base.GetComponent<NoiseMove>().enabled)
+			{
+				base.GetComponent<NoiseMove>().enabled = true;
+			}
+			if (this.startTime == 0f || this.durationTime == 0f || this.tornadoType == Tornado.TornadoType.NONE)
+			{
+				foreach (Tornado tornado in this.gameController.getSpecifiedTornados(Tornado.TornadoType.SURROUND))
+				{
+					if (tornado.attachedTornadoPhotonId == base.GetComponent<PhotonView>().viewID)
+					{
+						tornado.deleteTornado();
+					}
+				}
+				this.deleteTornado();
+			}
+		}
+		this.timer += Time.deltaTime;
+		switch (this.state)
+		{
+		case Tornado.TornadoState.GROWING:
+			if (!this.isControlled && this.timer > this.startTime && base.photonView != null)
+			{
+				base.photonView.RPC("changeEnableTornado", PhotonTargets.All, Array.Empty<object>());
+				return;
+			}
+			break;
+		case Tornado.TornadoState.ENABLED:
+			if ((this.tornadoType == Tornado.TornadoType.REAL && this.tornadoColumn.transform.localPosition.z > this.groundHeight) || (this.tornadoType != Tornado.TornadoType.REAL && this.tornadoColumn.transform.localPosition.z > this.fakeTornadoColumnTargetPosition))
+			{
+				this.tornadoColumn.transform.localPosition = new Vector3(this.tornadoColumn.transform.localPosition.x, this.tornadoColumn.transform.localPosition.y, Mathf.Max(0f, this.tornadoColumn.transform.localPosition.z - Time.deltaTime * this.columnFormationSpeed));
+			}
+			if (!this.isControlled)
+			{
+				if (this.tornadoType != Tornado.TornadoType.REAL)
+				{
+					if (this.tornadoColumn.transform.localPosition.z <= this.fakeTornadoColumnTargetPosition)
+					{
+						foreach (Tornado tornado2 in this.gameController.getSpecifiedTornados(Tornado.TornadoType.SURROUND))
+						{
+							if (tornado2.attachedTornadoPhotonId == base.GetComponent<PhotonView>().viewID)
+							{
+								tornado2.disableTornadoRPC();
+							}
+						}
+						this.disableTornadoRPC();
+						return;
+					}
+				}
+				else
+				{
+					if (this.timer > this.durationTime)
+					{
+						foreach (Tornado tornado3 in this.gameController.getSpecifiedTornados(Tornado.TornadoType.SURROUND))
+						{
+							if (tornado3.attachedTornadoPhotonId == base.GetComponent<PhotonView>().viewID)
+							{
+								tornado3.disableTornadoRPC();
+							}
+						}
+						this.disableTornadoRPC();
+						return;
+					}
+					if (this.isTouchingGround() && this.tornadoType == Tornado.TornadoType.REAL && !this.isFinishing)
+					{
+						switch (this.category)
+						{
+						case Tornado.TornadoCategory.EF1:
+							if (this.timer > this.durationTime * 0.95f)
+							{
+								this.setFinishingRPC();
+							}
+							break;
+						case Tornado.TornadoCategory.EF2:
+							if (this.timer > this.durationTime * 0.9f)
+							{
+								this.setFinishingRPC();
+							}
+							break;
+						case Tornado.TornadoCategory.EF3:
+							if (this.timer > this.durationTime * 0.8f)
+							{
+								this.setFinishingRPC();
+							}
+							break;
+						case Tornado.TornadoCategory.EF4:
+							if (this.timer > this.durationTime * 0.7f)
+							{
+								this.setFinishingRPC();
+							}
+							break;
+						case Tornado.TornadoCategory.EF5:
+							if (this.timer > this.durationTime * 0.6f)
+							{
+								this.setFinishingRPC();
+							}
+							break;
+						}
+						if (this.timer > this.nextChangeCategoryTime && GlobalValues.Instance.gameType != GlobalValues.GameType.SINGLEPLAYER_MISSION)
+						{
+							this.nextChangeCategoryTime += this.changeCategoryTime;
+							this.categoryModifier = UnityEngine.Random.Range(-3, 5);
+							if (Mathf.Abs(this.categoryModifier) == 1)
+							{
+								this.changeCategoryRPC(this.categoryModifier);
+								return;
+							}
+						}
+						else if (this.newForcedCategory != this.category)
+						{
+							base.photonView.RPC("changeCategory", PhotonTargets.All, new object[]
+							{
+								0,
+								this.newForcedCategory
+							});
+							this.newForcedCategory = this.category;
+							return;
+						}
+					}
+				}
+			}
+			break;
+		case Tornado.TornadoState.DISABLED:
+			if (this.isControlled)
+			{
+				this.tornadoColumn.transform.localPosition = new Vector3(this.tornadoColumn.transform.localPosition.x, this.tornadoColumn.transform.localPosition.y, this.columnStartYPosition);
+				return;
+			}
+			if (this.tornadoColumn.transform.localPosition.z < this.columnStartYPosition)
+			{
+				this.tornadoColumn.transform.localPosition = new Vector3(this.tornadoColumn.transform.localPosition.x, this.tornadoColumn.transform.localPosition.y, Mathf.Min(this.columnStartYPosition, this.tornadoColumn.transform.localPosition.z + Time.deltaTime * this.columnFormationSpeed));
+			}
+			if (GlobalValues.Instance.gameType != GlobalValues.GameType.SINGLEPLAYER_MISSION && !this.isDeleted && this.timer > this.deleteTime)
+			{
+				if (this.tornadoType != Tornado.TornadoType.SURROUND)
+				{
+					foreach (Tornado tornado4 in this.gameController.getSpecifiedTornados(Tornado.TornadoType.SURROUND))
+					{
+						if (tornado4.attachedTornadoPhotonId == base.GetComponent<PhotonView>().viewID)
+						{
+							tornado4.deleteTornado();
+						}
+					}
+					this.deleteTornado();
+					return;
+				}
+				this.gameController.updateTornadoSpawner(this.spawnerId);
+				if (this.attachedTornadoPhotonId == -1)
+				{
+					this.deleteTornado();
+				}
+			}
+			break;
+		default:
+			return;
+		}
+	}
+
+	// Token: 0x06001833 RID: 6195 RVA: 0x00014B6D File Offset: 0x00012D6D
+	private void OnDestroy()
+	{
+		if (this.tornadoMapPolygon != null)
+		{
+			UnityEngine.Object.Destroy(this.tornadoMapPolygon);
+		}
+		if (this.thunderstormMapPolygon != null)
+		{
+			UnityEngine.Object.Destroy(this.thunderstormMapPolygon);
+		}
+	}
+
+	// Token: 0x06001834 RID: 6196 RVA: 0x00014BA1 File Offset: 0x00012DA1
+	public void changeHeatmapValuesRPC()
+	{
+		base.photonView.RPC("changeHeatmapValues", PhotonTargets.All, Array.Empty<object>());
+	}
+
+	// Token: 0x06001835 RID: 6197 RVA: 0x00002E48 File Offset: 0x00001048
+	[PunRPC]
+	private void changeHeatmapValues()
+	{
+	}
+
+	// Token: 0x06001836 RID: 6198 RVA: 0x00014BB9 File Offset: 0x00012DB9
+	public void retrieveHeatmapValues()
+	{
+		base.photonView.RPC("updateHeatmapValues", base.photonView.owner, new object[]
+		{
+			PhotonNetwork.player
+		});
+	}
+
+	// Token: 0x06001837 RID: 6199 RVA: 0x00014BE4 File Offset: 0x00012DE4
+	[PunRPC]
+	private void updateHeatmapValues(PhotonPlayer photonPlayer)
+	{
+		base.photonView.RPC("changeHeatmapValues", photonPlayer, Array.Empty<object>());
+	}
+
+	// Token: 0x06001838 RID: 6200 RVA: 0x000C66AC File Offset: 0x000C48AC
+	private void updateParentTornado()
+	{
+		if (this.tornadoType != Tornado.TornadoType.SURROUND)
+		{
+			return;
+		}
+		foreach (Tornado tornado in this.gameController.getTornados())
+		{
+			if (tornado != null && tornado.GetComponent<PhotonView>() != null && tornado.GetComponent<PhotonView>().viewID == this.attachedTornadoPhotonId)
+			{
+				this.parentTornado = tornado;
+				break;
+			}
+		}
+	}
+
+	// Token: 0x06001839 RID: 6201 RVA: 0x000C673C File Offset: 0x000C493C
+	public void changeCategoryRPC(int newCategoryModifier)
+	{
+		Tornado.TornadoCategory tornadoCategory = this.category;
+		if (this.isControlled)
+		{
+			tornadoCategory = this.newCategory;
+			if (newCategoryModifier < 0 && this.newCategory != Tornado.TornadoCategory.EF0)
+			{
+				tornadoCategory = this.newCategory - 1;
+			}
+			else if (newCategoryModifier > 0 && this.newCategory != Tornado.TornadoCategory.EF5)
+			{
+				tornadoCategory = this.newCategory + 1;
+			}
+			if (tornadoCategory != this.newCategory)
+			{
+				base.photonView.RPC("changeCategory", PhotonTargets.All, new object[]
+				{
+					newCategoryModifier,
+					tornadoCategory
+				});
+				return;
+			}
+		}
+		else
+		{
+			if (newCategoryModifier < 0 && this.category != Tornado.TornadoCategory.EF0)
+			{
+				tornadoCategory = this.category - 1;
+			}
+			else if (newCategoryModifier > 0 && this.category != Tornado.TornadoCategory.EF5)
+			{
+				tornadoCategory = this.category + 1;
+			}
+			if (tornadoCategory != this.category)
+			{
+				base.photonView.RPC("changeCategory", PhotonTargets.All, new object[]
+				{
+					newCategoryModifier,
+					tornadoCategory
+				});
+			}
+		}
+	}
+
+	// Token: 0x0600183A RID: 6202 RVA: 0x00014BFC File Offset: 0x00012DFC
+	[PunRPC]
+	private void changeCategory(int newCategoryModifier, Tornado.TornadoCategory newCategory)
+	{
+		this.isChangingCategory = true;
+		this.newCategory = newCategory;
+		this.categoryModifier = newCategoryModifier;
+		this.changeCategoryTimer = 0f;
+		if (this.discovered)
+		{
+			this.playerDiscoverCategoryChange = true;
+		}
+	}
+
+	// Token: 0x0600183B RID: 6203 RVA: 0x00014C2D File Offset: 0x00012E2D
+	private void setFinishingRPC()
+	{
+		this.isFinishing = true;
+		base.photonView.RPC("setFinishing", PhotonTargets.All, new object[]
+		{
+			this.category
+		});
+	}
+
+	// Token: 0x0600183C RID: 6204 RVA: 0x000C6824 File Offset: 0x000C4A24
+	[PunRPC]
+	private void setFinishing(Tornado.TornadoCategory category)
+	{
+		if (!this.isFinishing && this.discovered)
+		{
+			this.categoryModifier = -1;
+			this.playerDiscoverCategoryChange = true;
+		}
+		this.category = category;
+		this.newForcedCategory = category;
+		this.newCategory = category;
+		if (this.isControlled)
+		{
+			this.finishingTime = (float)(1 + (Tornado.TornadoCategory)10 * this.newCategory);
+		}
+		else
+		{
+			this.finishingTime = this.durationTime - this.timer;
+		}
+		this.changeCategoryTimer = 0f;
+		this.finishingPercent = 0f;
+		this.isFinishing = true;
+	}
+
+	// Token: 0x0600183D RID: 6205 RVA: 0x00014C5B File Offset: 0x00012E5B
+	public void disableTornadoRPC()
+	{
+		base.photonView.RPC("changeDisableTornado", PhotonTargets.All, Array.Empty<object>());
+	}
+
+	// Token: 0x0600183E RID: 6206 RVA: 0x000C68B0 File Offset: 0x000C4AB0
+	[PunRPC]
+	private void changeEnableTornado()
+	{
+		this.updateTornadoSettings();
+		this.tornadoDisabled = false;
+		this.state = Tornado.TornadoState.ENABLED;
+		this.timer = 0f;
+		this.tornadoColumn.transform.localPosition = new Vector3(this.tornadoColumn.transform.localPosition.x, this.tornadoColumn.transform.localPosition.y, this.columnStartYPosition);
+	}
+
+	// Token: 0x0600183F RID: 6207 RVA: 0x00014C73 File Offset: 0x00012E73
+	[PunRPC]
+	private void changeDisableTornado()
+	{
+		this.state = Tornado.TornadoState.DISABLED;
+		this.timer = 0f;
+	}
+
+	// Token: 0x06001840 RID: 6208 RVA: 0x00014C87 File Offset: 0x00012E87
+	private void deleteTornado()
+	{
+		this.isDeleted = true;
+		base.StopAllCoroutines();
+		this.gameController.removeTornado(this);
+		if (PhotonNetwork.isMasterClient)
+		{
+			PhotonNetwork.Destroy(base.gameObject);
+			return;
+		}
+		UnityEngine.Object.Destroy(base.gameObject);
+	}
+
+	// Token: 0x06001841 RID: 6209 RVA: 0x000C6924 File Offset: 0x000C4B24
+	private void setTornadoVolume(float volume)
+	{
+		float num = Mathf.Min(1f, volume);
+		if (GameController.Instance.getLocalPlayer() != null && GameController.Instance.getLocalPlayer().isReducedVolume())
+		{
+			num *= 0.4f;
+		}
+		this.columnAudio.volume = num;
+		this.groundAudio.volume = num * 0.3f;
+	}
+
+	// Token: 0x06001842 RID: 6210 RVA: 0x00014CC0 File Offset: 0x00012EC0
+	public void toggleColumn()
+	{
+		if (!this.isFinishing)
+		{
+			if (this.state == Tornado.TornadoState.ENABLED)
+			{
+				this.setFinishingRPC();
+				return;
+			}
+			base.photonView.RPC("changeEnableTornado", PhotonTargets.All, Array.Empty<object>());
+		}
+	}
+
+	// Token: 0x06001843 RID: 6211 RVA: 0x00014CF0 File Offset: 0x00012EF0
+	public void lightningStrikeRPC(Vector3 startPosition, Vector3 endPosition)
+	{
+		if (base.photonView.isMine)
+		{
+			base.photonView.RPC("lightningStrike", PhotonTargets.All, new object[]
+			{
+				startPosition,
+				endPosition
+			});
+		}
+	}
+
+	// Token: 0x06001844 RID: 6212 RVA: 0x00014D28 File Offset: 0x00012F28
+	[PunRPC]
+	private void lightningStrike(Vector3 startPosition, Vector3 endPosition)
+	{
+		this.thunderstorm.calculateLightningStrike(startPosition, endPosition, true);
+	}
+
+	// Token: 0x06001845 RID: 6213 RVA: 0x00014D38 File Offset: 0x00012F38
+	public void setCategoryKnownRPC()
+	{
+		base.photonView.RPC("setCategoryKnown", PhotonTargets.All, Array.Empty<object>());
+	}
+
+	// Token: 0x06001846 RID: 6214 RVA: 0x00014D50 File Offset: 0x00012F50
+	[PunRPC]
+	private void setCategoryKnown()
+	{
+		this.categoryKnown = true;
+	}
+
+	// Token: 0x06001847 RID: 6215 RVA: 0x00002E48 File Offset: 0x00001048
+	public void discover()
+	{
+	}
+
+	// Token: 0x06001848 RID: 6216 RVA: 0x000C6988 File Offset: 0x000C4B88
+	public void updateTornadoWarnings()
+	{
+		if (this.state == Tornado.TornadoState.ENABLED)
+		{
+			if (this.columnTouchingGroundPercent >= this.tornadoWarningColumnPercent)
+			{
+				this.tornadoMapPolygon.transform.eulerAngles = new Vector3(-90f, 0f, 0f);
+				this.tornadoMapPolygon.SetActive(true);
+			}
+			else
+			{
+				this.tornadoMapPolygon.SetActive(false);
+			}
+		}
+		else
+		{
+			this.tornadoMapPolygon.SetActive(false);
+		}
+		if (this.currentThunderstormAmount >= this.strongThunderstormWarningValue)
+		{
+			this.thunderstormMapPolygon.transform.eulerAngles = new Vector3(-90f, 0f, 0f);
+			this.thunderstormMapPolygon.SetActive(true);
+		}
+		else
+		{
+			this.thunderstormMapPolygon.SetActive(false);
+		}
+		this.tornadoMapPolygon.transform.position = new Vector3(base.transform.position.x, this.tornadoMapPolygon.transform.position.y, base.transform.position.z);
+		this.thunderstormMapPolygon.transform.position = new Vector3(base.transform.position.x, this.thunderstormMapPolygon.transform.position.y, base.transform.position.z);
+	}
+
+	// Token: 0x06001849 RID: 6217 RVA: 0x000C6AD8 File Offset: 0x000C4CD8
+	private void updateTornadoFormation()
+	{
+		switch (this.state)
+		{
+		case Tornado.TornadoState.GROWING:
+			if (GlobalValues.Instance.gameType == GlobalValues.GameType.SINGLEPLAYER_MISSION)
+			{
+				this.completionPercent = 1f;
+			}
+			else
+			{
+				this.completionPercent = Mathf.Min(1f, this.timer / this.fullFormationTime);
+			}
+			break;
+		case Tornado.TornadoState.ENABLED:
+			this.completionPercent = 1f;
+			break;
+		case Tornado.TornadoState.DISABLED:
+			this.completionPercent = Mathf.Max(0f, 1f - this.timer / this.deleteTime);
+			break;
+		}
+		this.updateClouds(this.completionPercent);
+		this.updateThunderstormAmount(this.completionPercent);
+		this.updateRainAmount(this.completionPercent);
+	}
+
+	// Token: 0x0600184A RID: 6218 RVA: 0x000C6B90 File Offset: 0x000C4D90
+	private void updateClouds(float formationPercent)
+	{
+		if (this.tornadoType == Tornado.TornadoType.SURROUND)
+		{
+			this.cloudRotating.SetActive(false);
+			this.cloudAnvil.SetActive(false);
+			this.cloudUp.SetActive(true);
+		}
+		else
+		{
+			this.cloudAnvil.SetActive(true);
+			this.cloudUp.SetActive(false);
+			this.cloudRotating.SetActive(true);
+		}
+		if (float.IsNaN(formationPercent))
+		{
+			return;
+		}
+		this.cloudRotating.transform.localPosition = new Vector3(this.cloudRotating.transform.localPosition.x, this.cloudRotating.transform.localPosition.y, Mathf.Lerp(this.maxWallCloudHeight, this.wallCloudHeight, formationPercent));
+	}
+
+	// Token: 0x0600184B RID: 6219 RVA: 0x00014D59 File Offset: 0x00012F59
+	private void updateThunderstormAmount(float formationPercent)
+	{
+		this.currentThunderstormAmount = this.thunderstormAmount * formationPercent;
+	}
+
+	// Token: 0x0600184C RID: 6220 RVA: 0x00014D69 File Offset: 0x00012F69
+	private void updateRainAmount(float formationPercent)
+	{
+		this.currentRainAmount = this.rainAmount * formationPercent;
+		this.rainWallEmissionModule.rateOverTime = this.maxRainWallEmissionRate * this.currentRainAmount * this.currentRainAmount;
+	}
+
+	// Token: 0x0600184D RID: 6221 RVA: 0x00014D9D File Offset: 0x00012F9D
+	public void updateTornadoSettings()
+	{
+		this.groundRotatingCloudVelocityModule.radial = this.rotatingCloudGroundRadialMultiplier;
+		this.updateTornadoSettings(Tornado.TornadoCategory.EF0, this.category, 1f);
+	}
+
+	// Token: 0x0600184E RID: 6222 RVA: 0x000C6C4C File Offset: 0x000C4E4C
+	public void updateTornadoSettings(Tornado.TornadoCategory fromCategory, Tornado.TornadoCategory tornadoCategory, float LerpValue)
+	{
+		if (LerpValue == 1f && !this.isControlled)
+		{
+			if (fromCategory != this.newCategory)
+			{
+				base.gameObject.name = base.gameObject.name + "_" + tornadoCategory.ToString();
+			}
+			if (this.tornadoType == Tornado.TornadoType.FAKE)
+			{
+				base.gameObject.name = base.gameObject.name + "_Fake";
+			}
+			else if (this.tornadoType == Tornado.TornadoType.SURROUND)
+			{
+				base.gameObject.name = base.gameObject.name + "_Surround";
+			}
+		}
+		this.columnStartYPosition = this.wallCloudHeight;
+		this.columnLifeTime = 12f + this.wallCloudHeight * 0.02f;
+		Tornado.TornadoCategoryValues tornadoCategoryValues = this.GetTornadoCategoryValues(fromCategory);
+		Tornado.TornadoCategoryValues tornadoCategoryValues2 = this.GetTornadoCategoryValues(tornadoCategory);
+		float num;
+		if (LerpValue < 1f)
+		{
+			num = Mathf.Lerp(tornadoCategoryValues.MaxForce, tornadoCategoryValues2.MaxForce, LerpValue);
+			this.columnParticleModule.startSizeXMultiplier = Mathf.Lerp(tornadoCategoryValues.ColumnStartSize, tornadoCategoryValues2.ColumnStartSize, LerpValue);
+			this.columnParticleModule.startSizeYMultiplier = Mathf.Lerp(tornadoCategoryValues.ColumnStartSize, tornadoCategoryValues2.ColumnStartSize, LerpValue);
+			this.groundCloudParticleModule.startLifetime = Mathf.Lerp(tornadoCategoryValues.GroundCloudStartLifeTime, tornadoCategoryValues2.GroundCloudStartLifeTime, LerpValue);
+			this.groundCloudParticleModule.startSize = Mathf.Lerp(tornadoCategoryValues.GroundCloudStartSize, tornadoCategoryValues2.GroundCloudStartSize, LerpValue);
+			this.groundRotatingCloudParticleModule.startSize = Mathf.Lerp(tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier, tornadoCategoryValues2.GroundRotatingCloudStartSizeMultiplier, LerpValue);
+			this.groundRotatingCloudShapeModule.radius = Mathf.Lerp(tornadoCategoryValues.GroundRotatingCloudRadius, tornadoCategoryValues2.GroundRotatingCloudRadius, LerpValue);
+			this.groundDebrisShapeModule.radius = this.groundRotatingCloudShapeModule.radius * 0.8f;
+			this.columnAudioVolume = Mathf.Lerp(tornadoCategoryValues.ColumnAudioVolume, tornadoCategoryValues2.ColumnAudioVolume, LerpValue);
+			this.tornadoColumn.GetComponent<CapsuleCollider>().radius = Mathf.Lerp(tornadoCategoryValues.ColumnColliderRadius, tornadoCategoryValues2.ColumnColliderRadius, LerpValue);
+			this.terrainGrassSize = (int)Mathf.Lerp(tornadoCategoryValues.TerrainGrassSize, tornadoCategoryValues2.TerrainGrassSize, LerpValue);
+			this.groundMarkPressure = Mathf.Lerp(tornadoCategoryValues.GroundMarkPressure, tornadoCategoryValues2.GroundMarkPressure, LerpValue);
+			this.cloudRotatingAroundAxis.slowRotationSpeed = Mathf.Lerp(tornadoCategoryValues.WallCloudRotationSpeed, tornadoCategoryValues2.WallCloudRotationSpeed, LerpValue * this.completionPercent);
+		}
+		else
+		{
+			num = tornadoCategoryValues2.MaxForce;
+			this.columnParticleModule.startSizeXMultiplier = tornadoCategoryValues2.ColumnStartSize;
+			this.columnParticleModule.startSizeYMultiplier = tornadoCategoryValues2.ColumnStartSize;
+			this.groundCloudParticleModule.startLifetime = tornadoCategoryValues2.GroundCloudStartLifeTime;
+			this.groundCloudParticleModule.startSize = tornadoCategoryValues2.GroundCloudStartSize;
+			this.groundRotatingCloudParticleModule.startSize = tornadoCategoryValues2.GroundRotatingCloudStartSizeMultiplier;
+			this.groundRotatingCloudShapeModule.radius = tornadoCategoryValues2.GroundRotatingCloudRadius;
+			this.groundDebrisShapeModule.radius = this.groundRotatingCloudShapeModule.radius * 0.8f;
+			this.columnAudioVolume = tornadoCategoryValues2.ColumnAudioVolume;
+			this.tornadoColumn.GetComponent<CapsuleCollider>().radius = tornadoCategoryValues2.ColumnColliderRadius;
+			this.terrainGrassSize = (int)tornadoCategoryValues2.TerrainGrassSize;
+			this.groundMarkPressure = tornadoCategoryValues2.GroundMarkPressure;
+			this.cloudRotatingAroundAxis.slowRotationSpeed = Mathf.Lerp(1f, tornadoCategoryValues2.WallCloudRotationSpeed, this.completionPercent);
+		}
+		if (this.gameController.getLocalPlayer() != null)
+		{
+			this.columnParticleModule.startSizeZMultiplier = 0f;
+		}
+		if (this.gameController.getLocalTornadoController() != null)
+		{
+			this.columnParticleModule.startSizeZMultiplier = 10f;
+		}
+		this.columnStartSize = tornadoCategoryValues2.ColumnStartSize;
+		this.columnAudioVolume = Mathf.Max(0f, Mathf.Min(1f, this.columnAudioVolume));
+		this.tornadoCategoryForce = num;
+		this.tornadoPhysics.updatePhysicsValues();
+		this.columnParticleVelocityModule.xMultiplier = this.curveMultiplierX * 2f;
+		this.columnParticleVelocityModule.yMultiplier = this.curveMultiplierY * 2f;
+		this.columnParticleVelocityModule.zMultiplier = this.curveMultiplierZ * 2f;
+		if (!this.curveGoingUp && this.columnParticleVelocityModule.x.curve.keys.Length >= 3)
+		{
+			ParticleSystem.MinMaxCurve x = this.columnParticleVelocityModule.x;
+			x.curve.RemoveKey(Mathf.Max(0, this.columnParticleVelocityModule.x.curve.keys.Length - 2));
+			this.columnParticleVelocityModule.x = x;
+		}
+		if (this.emitHail || !this.isControlled || !base.photonView.isMine)
+		{
+			this.rainWall.gameObject.SetActive(true);
+		}
+	}
+
+	// Token: 0x0600184F RID: 6223 RVA: 0x000C7118 File Offset: 0x000C5318
+	private Tornado.TornadoCategoryValues GetTornadoCategoryValues(Tornado.TornadoCategory category)
+	{
+		Tornado.TornadoCategoryValues tornadoCategoryValues = new Tornado.TornadoCategoryValues();
+		switch (category)
+		{
+		case Tornado.TornadoCategory.EF0:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce * 0.14f;
+			tornadoCategoryValues.ColumnStartSize = 15f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 3f;
+			tornadoCategoryValues.GroundCloudStartSize = 60f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 40f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 70f;
+			tornadoCategoryValues.ColumnAudioVolume = 0.6f;
+			tornadoCategoryValues.ColumnColliderRadius = 50f;
+			tornadoCategoryValues.TerrainGrassSize = 5f;
+			tornadoCategoryValues.GroundMarkPressure = 0.4f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 1.5f;
+			break;
+		case Tornado.TornadoCategory.EF1:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce * 0.175f;
+			tornadoCategoryValues.ColumnStartSize = 20f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 3f;
+			tornadoCategoryValues.GroundCloudStartSize = 75f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 45f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 85f;
+			tornadoCategoryValues.ColumnAudioVolume = 0.65f;
+			tornadoCategoryValues.ColumnColliderRadius = 60f;
+			tornadoCategoryValues.TerrainGrassSize = 6f;
+			tornadoCategoryValues.GroundMarkPressure = 0.5f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 2f;
+			break;
+		case Tornado.TornadoCategory.EF2:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce * 0.3f;
+			tornadoCategoryValues.ColumnStartSize = 40f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 4f;
+			tornadoCategoryValues.GroundCloudStartSize = 100f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 55f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 100f;
+			tornadoCategoryValues.ColumnAudioVolume = 0.7f;
+			tornadoCategoryValues.ColumnColliderRadius = 70f;
+			tornadoCategoryValues.TerrainGrassSize = 8f;
+			tornadoCategoryValues.GroundMarkPressure = 0.6f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 2.5f;
+			break;
+		case Tornado.TornadoCategory.EF3:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce * 0.45f;
+			tornadoCategoryValues.ColumnStartSize = 60f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 4f;
+			tornadoCategoryValues.GroundCloudStartSize = 150f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 67f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 130f;
+			tornadoCategoryValues.ColumnAudioVolume = 0.8f;
+			tornadoCategoryValues.ColumnColliderRadius = 80f;
+			tornadoCategoryValues.TerrainGrassSize = 10f;
+			tornadoCategoryValues.GroundMarkPressure = 0.7f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 3f;
+			break;
+		case Tornado.TornadoCategory.EF4:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce * 0.6f;
+			tornadoCategoryValues.ColumnStartSize = 90f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 5f;
+			tornadoCategoryValues.GroundCloudStartSize = 300f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 80f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 170f;
+			tornadoCategoryValues.ColumnAudioVolume = 0.9f;
+			tornadoCategoryValues.ColumnColliderRadius = 120f;
+			tornadoCategoryValues.TerrainGrassSize = 15f;
+			tornadoCategoryValues.GroundMarkPressure = 0.8f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 3.5f;
+			break;
+		case Tornado.TornadoCategory.EF5:
+			tornadoCategoryValues.MaxForce = this.maxCategoryForce;
+			tornadoCategoryValues.ColumnStartSize = 125f;
+			tornadoCategoryValues.GroundCloudStartLifeTime = 6f;
+			tornadoCategoryValues.GroundCloudStartSize = 400f;
+			tornadoCategoryValues.GroundRotatingCloudStartSizeMultiplier = 100f;
+			tornadoCategoryValues.GroundRotatingCloudRadius = 250f;
+			tornadoCategoryValues.ColumnAudioVolume = 1f;
+			tornadoCategoryValues.ColumnColliderRadius = 150f;
+			tornadoCategoryValues.TerrainGrassSize = 40f;
+			tornadoCategoryValues.GroundMarkPressure = 1f;
+			tornadoCategoryValues.WallCloudRotationSpeed = 4f;
+			break;
+		}
+		return tornadoCategoryValues;
+	}
+
+	// Token: 0x06001850 RID: 6224 RVA: 0x00014DC7 File Offset: 0x00012FC7
+	public float getTornadoColliderRadius()
+	{
+		return this.tornadoPhysics.getColliderRadius();
+	}
+
+	// Token: 0x06001851 RID: 6225 RVA: 0x00014DD4 File Offset: 0x00012FD4
+	public bool isTouchingGround()
+	{
+		return this.touchingGround;
+	}
+
+	// Token: 0x06001852 RID: 6226 RVA: 0x000117E2 File Offset: 0x0000F9E2
+	[PunRPC]
+	private void retrieveTornadoPosition()
+	{
+		base.photonView.RPC("updatePosition", PhotonTargets.Others, new object[]
+		{
+			base.transform.position
+		});
+	}
+
+	// Token: 0x06001853 RID: 6227 RVA: 0x0001183D File Offset: 0x0000FA3D
+	[PunRPC]
+	private void updatePosition(Vector3 position)
+	{
+		base.transform.position = position;
+	}
+
+	// Token: 0x06001854 RID: 6228 RVA: 0x00014DDC File Offset: 0x00012FDC
+	private IEnumerator removeTerrainDetails()
+	{
+		while (this.tornadoType == Tornado.TornadoType.REAL)
+		{
+			if (this.tornadoType == Tornado.TornadoType.REAL && this.state == Tornado.TornadoState.ENABLED && this.tornadoColumn.transform.localPosition.z <= this.groundHeight && this.touchingGround && this.gameController != null && this.gameController.terrain != null)
+			{
+				int num = (int)UnityEngine.Random.Range((float)this.terrainGrassSize * 0.8f, (float)this.terrainGrassSize * 1.2f);
+				if (this.gameController.terrain.detailObjectDistance > 50f)
+				{
+					int detailWidth = this.gameController.terrain.terrainData.detailWidth;
+					int detailHeight = this.gameController.terrain.terrainData.detailHeight;
+					Vector3 vector = this.tornadoColumn.transform.position - this.gameController.terrain.gameObject.transform.position;
+					Vector3 vector2;
+					vector2.x = vector.x / this.gameController.terrain.terrainData.size.x;
+					vector2.y = vector.y / this.gameController.terrain.terrainData.size.y;
+					vector2.z = vector.z / this.gameController.terrain.terrainData.size.z;
+					int num2 = (int)(vector2.x * (float)detailWidth);
+					int num3 = (int)(vector2.z * (float)detailHeight);
+					int num4 = num / 2;
+					int num5 = this.gameController.terrain.terrainData.detailPrototypes.Length;
+					List<int[,]> list = new List<int[,]>();
+					for (int i = 0; i < num5; i++)
+					{
+						list.Add(this.gameController.terrain.terrainData.GetDetailLayer(num2 - num4, num3 - num4, num, num, i));
+					}
+					for (int j = 0; j < num; j++)
+					{
+						for (int k = 0; k < num; k++)
+						{
+							int num6 = Mathf.Abs(num4 - k) + Mathf.Abs(num4 - j);
+							if ((float)num6 <= (float)num * 0.65f)
+							{
+								int num7 = 0;
+								for (int l = 1; l < num5; l++)
+								{
+									if (list[l][k, j] > num7)
+									{
+										num7 = list[l][k, j];
+									}
+									if ((float)num6 <= (float)num * 0.4f)
+									{
+										list[l][k, j] = 0;
+									}
+									else if (list[l][k, j] > 2)
+									{
+										list[l][k, j] = 2;
+									}
+								}
+								if (num7 != 0)
+								{
+									if ((float)num6 <= (float)num * 0.3f)
+									{
+										list[0][k, j] = 1;
+									}
+									else if ((float)num6 <= (float)num * 0.5f && list[0][k, j] == 0)
+									{
+										list[0][k, j] = 1;
+									}
+									else if (list[0][k, j] == 0)
+									{
+										list[0][k, j] = 1;
+									}
+								}
+							}
+						}
+					}
+					for (int m = 0; m < num5; m++)
+					{
+						this.gameController.terrain.terrainData.SetDetailLayer(num2 - num4, num3 - num4, m, list[m]);
+					}
+				}
+				RaycastHit raycastHit = default(RaycastHit);
+				int mask = LayerMask.GetMask(new string[]
+				{
+					"Terrain"
+				});
+				if (Physics.Raycast(this.centerCameraTarget.transform.position, -base.transform.forward, out raycastHit, float.PositiveInfinity, mask))
+				{
+					if (this.currentGroundMarkPressure < this.groundMarkPressure)
+					{
+						this.currentGroundMarkPressure = Mathf.Min(this.groundMarkPressure, this.currentGroundMarkPressure + 0.4f * Time.deltaTime);
+					}
+					this.lastMarksIndex = this.groundMarksRenderer.AddMark(this.tornadoColumn.transform.position, raycastHit.normal, this.currentGroundMarkPressure, 0f, (float)num * 4f, this.lastMarksIndex);
+				}
+			}
+			else
+			{
+				this.currentGroundMarkPressure = 0f;
+			}
+			yield return new WaitForSeconds((this.gameController.maxWindSpeed + 1f - base.GetComponent<NoiseMove>().currentSpeed) * 0.5f);
+		}
+		yield break;
+		yield break;
+	}
+
+	// Token: 0x06001855 RID: 6229 RVA: 0x000C7460 File Offset: 0x000C5660
+	private void OnPhotonSerializeView(PhotonStream stream, PhotonMessageInfo info)
+	{
+		if (stream.isWriting)
+		{
+			stream.SendNext(base.transform.position);
+			stream.SendNext(base.transform.rotation);
+			stream.SendNext(this.tornadoColumn.transform.localPosition);
+			stream.SendNext(this.physicsRoot.transform.localPosition);
+			stream.SendNext(this.timer);
+			stream.SendNext(base.GetComponent<NoiseMove>().currentSpeed);
+			stream.SendNext(base.GetComponent<NoiseMove>().currentDirection);
+			return;
+		}
+		this.networkTransformPosition = (Vector3)stream.ReceiveNext();
+		this.networkTransformRotation = (Quaternion)stream.ReceiveNext();
+		this.networkTornadoColumnTransformPosition = (Vector3)stream.ReceiveNext();
+		this.networkTornadoPhysicsTransformPosition = (Vector3)stream.ReceiveNext();
+		this.timer = (float)stream.ReceiveNext();
+		base.GetComponent<NoiseMove>().currentSpeed = (float)stream.ReceiveNext();
+		base.GetComponent<NoiseMove>().currentDirection = (Vector2)stream.ReceiveNext();
+	}
+
+	// Token: 0x06001856 RID: 6230 RVA: 0x000C759C File Offset: 0x000C579C
+	public Tornado()
+	{
+	}
+
+	// Token: 0x04001C86 RID: 7302
+	public Tornado.TornadoCategory newForcedCategory;
+
+	// Token: 0x04001C87 RID: 7303
+	public Tornado.TornadoCategory category;
+
+	// Token: 0x04001C88 RID: 7304
+	public Tornado.TornadoState state;
+
+	// Token: 0x04001C89 RID: 7305
+	[HideInInspector]
+	public Tornado.TornadoCategory newCategory;
+
+	// Token: 0x04001C8A RID: 7306
+	[HideInInspector]
+	public float playerDistance = -1f;
+
+	// Token: 0x04001C8B RID: 7307
+	public bool isControlled;
+
+	// Token: 0x04001C8C RID: 7308
+	public Tornado.TornadoType tornadoType;
+
+	// Token: 0x04001C8D RID: 7309
+	public bool randomGeneration = true;
+
+	// Token: 0x04001C8E RID: 7310
+	[HideInInspector]
+	public int attachedTornadoPhotonId = -1;
+
+	// Token: 0x04001C8F RID: 7311
+	public float maxCategoryForce = 1000f;
+
+	// Token: 0x04001C90 RID: 7312
+	[HideInInspector]
+	public float tornadoCategoryForce;
+
+	// Token: 0x04001C91 RID: 7313
+	[HideInInspector]
+	public float sizeConeEnlargeTime;
+
+	// Token: 0x04001C92 RID: 7314
+	[HideInInspector]
+	public float sizeConeBase;
+
+	// Token: 0x04001C93 RID: 7315
+	private bool curveGoingUp = true;
+
+	// Token: 0x04001C94 RID: 7316
+	[HideInInspector]
+	public float curveMultiplierX;
+
+	// Token: 0x04001C95 RID: 7317
+	[HideInInspector]
+	public float curveMultiplierY;
+
+	// Token: 0x04001C96 RID: 7318
+	[HideInInspector]
+	public float curveMultiplierZ;
+
+	// Token: 0x04001C97 RID: 7319
+	[HideInInspector]
+	public float rotatingCloudGroundRadialMultiplier;
+
+	// Token: 0x04001C98 RID: 7320
+	[HideInInspector]
+	public Vector3 tornadoPolygonScale;
+
+	// Token: 0x04001C99 RID: 7321
+	[HideInInspector]
+	public Vector3 tornadoPolygonTranslation;
+
+	// Token: 0x04001C9A RID: 7322
+	[HideInInspector]
+	public float tornadoPolygonRotation;
+
+	// Token: 0x04001C9B RID: 7323
+	[HideInInspector]
+	public Vector3 thunderstormPolygonScale;
+
+	// Token: 0x04001C9C RID: 7324
+	[HideInInspector]
+	public Vector3 thunderstormPolygonTranslation;
+
+	// Token: 0x04001C9D RID: 7325
+	[HideInInspector]
+	public float thunderstormPolygonRotation;
+
+	// Token: 0x04001C9E RID: 7326
+	public GameObject tornadoMapPolygon;
+
+	// Token: 0x04001C9F RID: 7327
+	public GameObject thunderstormMapPolygon;
+
+	// Token: 0x04001CA0 RID: 7328
+	public Thunderstorm thunderstorm;
+
+	// Token: 0x04001CA1 RID: 7329
+	public bool emitHail;
+
+	// Token: 0x04001CA2 RID: 7330
+	public float thunderstormAmount;
+
+	// Token: 0x04001CA3 RID: 7331
+	[HideInInspector]
+	public float currentThunderstormAmount;
+
+	// Token: 0x04001CA4 RID: 7332
+	private float strongThunderstormWarningValue = 0.7f;
+
+	// Token: 0x04001CA5 RID: 7333
+	public float rainAmount;
+
+	// Token: 0x04001CA6 RID: 7334
+	[HideInInspector]
+	public float currentRainAmount;
+
+	// Token: 0x04001CA7 RID: 7335
+	public bool radarWindDirectionInside = true;
+
+	// Token: 0x04001CA8 RID: 7336
+	private float hailProbability = 0.5f;
+
+	// Token: 0x04001CA9 RID: 7337
+	public float groundHeight = 9f;
+
+	// Token: 0x04001CAA RID: 7338
+	public int surroundTornadoLayerIndex;
+
+	// Token: 0x04001CAB RID: 7339
+	[HideInInspector]
+	public float columnTouchingGroundPercent;
+
+	// Token: 0x04001CAC RID: 7340
+	public float maxHailDistance = 700f;
+
+	// Token: 0x04001CAD RID: 7341
+	public float minHailDistance = 200f;
+
+	// Token: 0x04001CAE RID: 7342
+	public AudioSource columnAudio;
+
+	// Token: 0x04001CAF RID: 7343
+	public AudioSource groundAudio;
+
+	// Token: 0x04001CB0 RID: 7344
+	private float columnAudioInitialMaxDistance;
+
+	// Token: 0x04001CB1 RID: 7345
+	private float groundAudioInitialMaxDistance;
+
+	// Token: 0x04001CB2 RID: 7346
+	public TireMarksRenderer groundMarksRenderer;
+
+	// Token: 0x04001CB3 RID: 7347
+	private int lastMarksIndex = -1;
+
+	// Token: 0x04001CB4 RID: 7348
+	private float tornadoWarningColumnPercent;
+
+	// Token: 0x04001CB5 RID: 7349
+	private bool tornadoWarningSent;
+
+	// Token: 0x04001CB6 RID: 7350
+	public float startTime;
+
+	// Token: 0x04001CB7 RID: 7351
+	public float fullFormationTime;
+
+	// Token: 0x04001CB8 RID: 7352
+	public float durationTime;
+
+	// Token: 0x04001CB9 RID: 7353
+	[HideInInspector]
+	public float deleteTime = 180f;
+
+	// Token: 0x04001CBA RID: 7354
+	public float timer;
+
+	// Token: 0x04001CBB RID: 7355
+	public float completionPercent;
+
+	// Token: 0x04001CBC RID: 7356
+	[Tooltip("In seconds")]
+	public float minStartTime = 10f;
+
+	// Token: 0x04001CBD RID: 7357
+	[Tooltip("In seconds")]
+	public float maxStartTime = 180f;
+
+	// Token: 0x04001CBE RID: 7358
+	[Tooltip("In seconds")]
+	public float minDurationTime = 180f;
+
+	// Token: 0x04001CBF RID: 7359
+	[Tooltip("In seconds")]
+	public float maxDurationTime = 600f;
+
+	// Token: 0x04001CC0 RID: 7360
+	public GameObject topCameraTarget;
+
+	// Token: 0x04001CC1 RID: 7361
+	public GameObject centerCameraTarget;
+
+	// Token: 0x04001CC2 RID: 7362
+	public GameObject bottomCameraTarget;
+
+	// Token: 0x04001CC3 RID: 7363
+	public GameObject tornadoColumn;
+
+	// Token: 0x04001CC4 RID: 7364
+	public GameObject physicsRoot;
+
+	// Token: 0x04001CC5 RID: 7365
+	public GameObject cloudAnvil;
+
+	// Token: 0x04001CC6 RID: 7366
+	public GameObject cloudUp;
+
+	// Token: 0x04001CC7 RID: 7367
+	public GameObject cloudMiddle;
+
+	// Token: 0x04001CC8 RID: 7368
+	public GameObject cloudBase;
+
+	// Token: 0x04001CC9 RID: 7369
+	public GameObject cloudRotating;
+
+	// Token: 0x04001CCA RID: 7370
+	private RotateAroundAxis cloudRotatingAroundAxis;
+
+	// Token: 0x04001CCB RID: 7371
+	public float wallCloudHeight = 200f;
+
+	// Token: 0x04001CCC RID: 7372
+	public ParticleSystem groundCloud;
+
+	// Token: 0x04001CCD RID: 7373
+	public ParticleSystem groundRotatingCloud;
+
+	// Token: 0x04001CCE RID: 7374
+	public ParticleSystem groundDebris;
+
+	// Token: 0x04001CCF RID: 7375
+	public ParticleSystem rainWall;
+
+	// Token: 0x04001CD0 RID: 7376
+	public GameObject mapMarker;
+
+	// Token: 0x04001CD1 RID: 7377
+	private float maxWallCloudHeight = 500f;
+
+	// Token: 0x04001CD2 RID: 7378
+	private float minWallCloudHeight = 240f;
+
+	// Token: 0x04001CD3 RID: 7379
+	private float maxRainWallEmissionRate = 20f;
+
+	// Token: 0x04001CD4 RID: 7380
+	public float minColumnFormationSpeed = 2f;
+
+	// Token: 0x04001CD5 RID: 7381
+	public float maxColumnFormationSpeed = 6f;
+
+	// Token: 0x04001CD6 RID: 7382
+	private bool tornadoDisabled;
+
+	// Token: 0x04001CD7 RID: 7383
+	private bool touchingGround;
+
+	// Token: 0x04001CD8 RID: 7384
+	private Vector3 networkTransformPosition = Vector3.zero;
+
+	// Token: 0x04001CD9 RID: 7385
+	private Quaternion networkTransformRotation = Quaternion.identity;
+
+	// Token: 0x04001CDA RID: 7386
+	private Vector3 networkTornadoColumnTransformPosition = Vector3.zero;
+
+	// Token: 0x04001CDB RID: 7387
+	private Vector3 networkTornadoPhysicsTransformPosition = Vector3.zero;
+
+	// Token: 0x04001CDC RID: 7388
+	private bool firstTake;
+
+	// Token: 0x04001CDD RID: 7389
+	private GameController gameController;
+
+	// Token: 0x04001CDE RID: 7390
+	private ParticleSystem.MainModule columnParticleModule;
+
+	// Token: 0x04001CDF RID: 7391
+	private ParticleSystem.VelocityOverLifetimeModule columnParticleVelocityModule;
+
+	// Token: 0x04001CE0 RID: 7392
+	private ParticleSystem.SizeOverLifetimeModule columnParticleSizeModule;
+
+	// Token: 0x04001CE1 RID: 7393
+	private ParticleSystem.MainModule groundCloudParticleModule;
+
+	// Token: 0x04001CE2 RID: 7394
+	private ParticleSystem.EmissionModule groundCloudParticleEmissionModule;
+
+	// Token: 0x04001CE3 RID: 7395
+	private ParticleSystem.MainModule groundRotatingCloudParticleModule;
+
+	// Token: 0x04001CE4 RID: 7396
+	private ParticleSystem.ShapeModule groundRotatingCloudShapeModule;
+
+	// Token: 0x04001CE5 RID: 7397
+	private ParticleSystem.VelocityOverLifetimeModule groundRotatingCloudVelocityModule;
+
+	// Token: 0x04001CE6 RID: 7398
+	private ParticleSystem.ShapeModule groundDebrisShapeModule;
+
+	// Token: 0x04001CE7 RID: 7399
+	private ParticleSystem.EmissionModule rainWallEmissionModule;
+
+	// Token: 0x04001CE8 RID: 7400
+	private float changeCategoryTime = 180f;
+
+	// Token: 0x04001CE9 RID: 7401
+	private float nextChangeCategoryTime;
+
+	// Token: 0x04001CEA RID: 7402
+	private float changeCategoryDuration = 10f;
+
+	// Token: 0x04001CEB RID: 7403
+	private float changeCategoryTimer;
+
+	// Token: 0x04001CEC RID: 7404
+	[HideInInspector]
+	public bool isFinishing;
+
+	// Token: 0x04001CED RID: 7405
+	private float finishingTime;
+
+	// Token: 0x04001CEE RID: 7406
+	[HideInInspector]
+	public float finishingPercent;
+
+	// Token: 0x04001CEF RID: 7407
+	[HideInInspector]
+	public int categoryModifier = -2;
+
+	// Token: 0x04001CF0 RID: 7408
+	[HideInInspector]
+	public bool playerDiscoverCategoryChange;
+
+	// Token: 0x04001CF1 RID: 7409
+	private float columnAudioVolume;
+
+	// Token: 0x04001CF2 RID: 7410
+	private bool isChangingCategory;
+
+	// Token: 0x04001CF3 RID: 7411
+	public TornadoPhysics tornadoPhysics;
+
+	// Token: 0x04001CF4 RID: 7412
+	private float columnLifeTime;
+
+	// Token: 0x04001CF5 RID: 7413
+	private float columnStartSize = 10f;
+
+	// Token: 0x04001CF6 RID: 7414
+	public float columnStartYPosition = 150f;
+
+	// Token: 0x04001CF7 RID: 7415
+	private float columnColorModifier = 0.2f;
+
+	// Token: 0x04001CF8 RID: 7416
+	private float fakeTornadoColumnTargetPosition;
+
+	// Token: 0x04001CF9 RID: 7417
+	public bool categoryKnown;
+
+	// Token: 0x04001CFA RID: 7418
+	public bool discovered;
+
+	// Token: 0x04001CFB RID: 7419
+	[HideInInspector]
+	public float columnFormationSpeed = 3f;
+
+	// Token: 0x04001CFC RID: 7420
+	private int terrainGrassSize = 10;
+
+	// Token: 0x04001CFD RID: 7421
+	private float groundMarkPressure = 1f;
+
+	// Token: 0x04001CFE RID: 7422
+	private float currentGroundMarkPressure;
+
+	// Token: 0x04001CFF RID: 7423
+	public float controlledTornadoAlpha = 0.1f;
+
+	// Token: 0x04001D00 RID: 7424
+	private float tornadoAlpha = 1f;
+
+	// Token: 0x04001D01 RID: 7425
+	private bool isDeleted;
+
+	// Token: 0x04001D02 RID: 7426
+	private bool isNight;
+
+	// Token: 0x04001D03 RID: 7427
+	private int _spawnerId = -1;
+
+	// Token: 0x04001D04 RID: 7428
+	private Tornado parentTornado;
+
+	// Token: 0x02000348 RID: 840
+	public enum TornadoCategory
+	{
+		// Token: 0x04001D06 RID: 7430
+		EF0,
+		// Token: 0x04001D07 RID: 7431
+		EF1,
+		// Token: 0x04001D08 RID: 7432
+		EF2,
+		// Token: 0x04001D09 RID: 7433
+		EF3,
+		// Token: 0x04001D0A RID: 7434
+		EF4,
+		// Token: 0x04001D0B RID: 7435
+		EF5
+	}
+
+	// Token: 0x02000349 RID: 841
+	public enum TornadoType
+	{
+		// Token: 0x04001D0D RID: 7437
+		REAL,
+		// Token: 0x04001D0E RID: 7438
+		FAKE,
+		// Token: 0x04001D0F RID: 7439
+		SURROUND,
+		// Token: 0x04001D10 RID: 7440
+		NONE
+	}
+
+	// Token: 0x0200034A RID: 842
+	public enum TornadoState
+	{
+		// Token: 0x04001D12 RID: 7442
+		GROWING,
+		// Token: 0x04001D13 RID: 7443
+		ENABLED,
+		// Token: 0x04001D14 RID: 7444
+		DISABLED
+	}
+
+	// Token: 0x0200034B RID: 843
+	private class TornadoCategoryValues
+	{
+		// Token: 0x17000329 RID: 809
+		// (get) Token: 0x06001857 RID: 6231 RVA: 0x00014DEB File Offset: 0x00012FEB
+		// (set) Token: 0x06001858 RID: 6232 RVA: 0x00014DF3 File Offset: 0x00012FF3
+		public float MaxForce
+		{
+			get
+			{
+				return this.maxForce;
+			}
+			set
+			{
+				this.maxForce = value;
+			}
+		}
+
+		// Token: 0x1700032A RID: 810
+		// (get) Token: 0x06001859 RID: 6233 RVA: 0x00014DFC File Offset: 0x00012FFC
+		// (set) Token: 0x0600185A RID: 6234 RVA: 0x00014E04 File Offset: 0x00013004
+		public float ColumnStartSize
+		{
+			get
+			{
+				return this.columnStartSize;
+			}
+			set
+			{
+				this.columnStartSize = value;
+			}
+		}
+
+		// Token: 0x1700032B RID: 811
+		// (get) Token: 0x0600185B RID: 6235 RVA: 0x00014E0D File Offset: 0x0001300D
+		// (set) Token: 0x0600185C RID: 6236 RVA: 0x00014E15 File Offset: 0x00013015
+		public float GroundCloudStartLifeTime
+		{
+			get
+			{
+				return this.groundCloudStartLifeTime;
+			}
+			set
+			{
+				this.groundCloudStartLifeTime = value;
+			}
+		}
+
+		// Token: 0x1700032C RID: 812
+		// (get) Token: 0x0600185D RID: 6237 RVA: 0x00014E1E File Offset: 0x0001301E
+		// (set) Token: 0x0600185E RID: 6238 RVA: 0x00014E26 File Offset: 0x00013026
+		public float GroundCloudStartSize
+		{
+			get
+			{
+				return this.groundCloudStartSize;
+			}
+			set
+			{
+				this.groundCloudStartSize = value;
+			}
+		}
+
+		// Token: 0x1700032D RID: 813
+		// (get) Token: 0x0600185F RID: 6239 RVA: 0x00014E2F File Offset: 0x0001302F
+		// (set) Token: 0x06001860 RID: 6240 RVA: 0x00014E37 File Offset: 0x00013037
+		public float GroundRotatingCloudStartSizeMultiplier
+		{
+			get
+			{
+				return this.groundRotatingCloudStartSizeMultiplier;
+			}
+			set
+			{
+				this.groundRotatingCloudStartSizeMultiplier = value;
+			}
+		}
+
+		// Token: 0x1700032E RID: 814
+		// (get) Token: 0x06001861 RID: 6241 RVA: 0x00014E40 File Offset: 0x00013040
+		// (set) Token: 0x06001862 RID: 6242 RVA: 0x00014E48 File Offset: 0x00013048
+		public float GroundRotatingCloudRadius
+		{
+			get
+			{
+				return this.groundRotatingCloudRadius;
+			}
+			set
+			{
+				this.groundRotatingCloudRadius = value;
+			}
+		}
+
+		// Token: 0x1700032F RID: 815
+		// (get) Token: 0x06001863 RID: 6243 RVA: 0x00014E51 File Offset: 0x00013051
+		// (set) Token: 0x06001864 RID: 6244 RVA: 0x00014E59 File Offset: 0x00013059
+		public float ColumnAudioVolume
+		{
+			get
+			{
+				return this.columnAudioVolume;
+			}
+			set
+			{
+				this.columnAudioVolume = value;
+			}
+		}
+
+		// Token: 0x17000330 RID: 816
+		// (get) Token: 0x06001865 RID: 6245 RVA: 0x00014E62 File Offset: 0x00013062
+		// (set) Token: 0x06001866 RID: 6246 RVA: 0x00014E6A File Offset: 0x0001306A
+		public float ColumnColliderRadius
+		{
+			get
+			{
+				return this.columnColliderRadius;
+			}
+			set
+			{
+				this.columnColliderRadius = value;
+			}
+		}
+
+		// Token: 0x17000331 RID: 817
+		// (get) Token: 0x06001867 RID: 6247 RVA: 0x00014E73 File Offset: 0x00013073
+		// (set) Token: 0x06001868 RID: 6248 RVA: 0x00014E7B File Offset: 0x0001307B
+		public float TerrainGrassSize
+		{
+			get
+			{
+				return this.terrainGrassSize;
+			}
+			set
+			{
+				this.terrainGrassSize = value;
+			}
+		}
+
+		// Token: 0x17000332 RID: 818
+		// (get) Token: 0x06001869 RID: 6249 RVA: 0x00014E84 File Offset: 0x00013084
+		// (set) Token: 0x0600186A RID: 6250 RVA: 0x00014E8C File Offset: 0x0001308C
+		public float GroundMarkPressure
+		{
+			get
+			{
+				return this.groundMarkPressure;
+			}
+			set
+			{
+				this.groundMarkPressure = value;
+			}
+		}
+
+		// Token: 0x17000333 RID: 819
+		// (get) Token: 0x0600186B RID: 6251 RVA: 0x00014E95 File Offset: 0x00013095
+		// (set) Token: 0x0600186C RID: 6252 RVA: 0x00014E9D File Offset: 0x0001309D
+		public float WallCloudRotationSpeed
+		{
+			get
+			{
+				return this.wallCloudRotationSpeed;
+			}
+			set
+			{
+				this.wallCloudRotationSpeed = value;
+			}
+		}
+
+		// Token: 0x0600186D RID: 6253 RVA: 0x000035FF File Offset: 0x000017FF
+		public TornadoCategoryValues()
+		{
+		}
+
+		// Token: 0x04001D15 RID: 7445
+		private float maxForce;
+
+		// Token: 0x04001D16 RID: 7446
+		private float columnStartSize;
+
+		// Token: 0x04001D17 RID: 7447
+		private float groundCloudStartLifeTime;
+
+		// Token: 0x04001D18 RID: 7448
+		private float groundCloudStartSize;
+
+		// Token: 0x04001D19 RID: 7449
+		private float groundRotatingCloudStartSizeMultiplier;
+
+		// Token: 0x04001D1A RID: 7450
+		private float groundRotatingCloudRadius;
+
+		// Token: 0x04001D1B RID: 7451
+		private float columnAudioVolume;
+
+		// Token: 0x04001D1C RID: 7452
+		private float columnColliderRadius;
+
+		// Token: 0x04001D1D RID: 7453
+		private float terrainGrassSize;
+
+		// Token: 0x04001D1E RID: 7454
+		private float groundMarkPressure;
+
+		// Token: 0x04001D1F RID: 7455
+		private float wallCloudRotationSpeed;
+	}
+
+	// Token: 0x0200034C RID: 844
+	public class TornadoRadar
+	{
+		// Token: 0x0600186E RID: 6254 RVA: 0x000C7740 File Offset: 0x000C5940
+		public TornadoRadar(Tornado tornado)
+		{
+			if (tornado == null)
+			{
+				return;
+			}
+			this.state = tornado.state;
+			this.type = tornado.tornadoType;
+			if (tornado.parentTornado != null)
+			{
+				this.parentTornado = new Tornado.TornadoRadar(tornado.parentTornado);
+			}
+			this.position = new Vector2(tornado.transform.position.x, tornado.transform.position.z);
+			this.instanceId = tornado.GetInstanceID();
+			this.rainAmount = tornado.rainAmount;
+			this.surroundTornadoLayerIndex = tornado.surroundTornadoLayerIndex;
+			this.currentRainAmount = tornado.currentRainAmount;
+			this.timer = tornado.timer;
+			this.startTime = tornado.startTime;
+			this.deleteTime = tornado.deleteTime;
+			this.tornadoCategoryForce = tornado.tornadoCategoryForce;
+			this.maxCategoryForce = tornado.maxCategoryForce;
+			this.columnTouchingGroundPercent = tornado.columnTouchingGroundPercent;
+		}
+
+		// Token: 0x04001D20 RID: 7456
+		public Tornado.TornadoState state;
+
+		// Token: 0x04001D21 RID: 7457
+		public Tornado.TornadoType type;
+
+		// Token: 0x04001D22 RID: 7458
+		public Tornado.TornadoRadar parentTornado;
+
+		// Token: 0x04001D23 RID: 7459
+		public Vector2 position;
+
+		// Token: 0x04001D24 RID: 7460
+		public int instanceId;
+
+		// Token: 0x04001D25 RID: 7461
+		public int surroundTornadoLayerIndex;
+
+		// Token: 0x04001D26 RID: 7462
+		public float rainAmount;
+
+		// Token: 0x04001D27 RID: 7463
+		public float currentRainAmount;
+
+		// Token: 0x04001D28 RID: 7464
+		public float timer;
+
+		// Token: 0x04001D29 RID: 7465
+		public float startTime;
+
+		// Token: 0x04001D2A RID: 7466
+		public float deleteTime;
+
+		// Token: 0x04001D2B RID: 7467
+		public float tornadoCategoryForce;
+
+		// Token: 0x04001D2C RID: 7468
+		public float maxCategoryForce;
+
+		// Token: 0x04001D2D RID: 7469
+		public float columnTouchingGroundPercent;
+	}
+}
